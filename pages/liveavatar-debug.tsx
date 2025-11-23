@@ -250,7 +250,7 @@ export default function LivekitDebugPage() {
       }
 
       setRoom(r);
-      log('LIVEKIT', '✅ Connected to LiveKit room', { name: r.name, sessionId });
+      log('LIVEKIT', '✅ Connected to LiveKit room', { name: r.name });
       log('SESSION', '=== SESSION ACTIVE - Ready to communicate ===');
 
       // Wire up all event listeners
@@ -519,10 +519,6 @@ export default function LivekitDebugPage() {
       log('ROOM_EVENT', 'RecordingStatusChanged', { recording });
     });
 
-    r.on(RoomEvent.TranscriptionStatusChanged, (transcribing: boolean) => {
-      log('ROOM_EVENT', 'TranscriptionStatusChanged', { transcribing });
-    });
-
     // Wire existing participants
     log('EVENTS', 'Checking for existing participants');
     const existingParticipants = Array.from(r.remoteParticipants.values());
@@ -761,7 +757,6 @@ export default function LivekitDebugPage() {
       
       log('STATS', 'Room Info', {
         name: room.name,
-        sessionId: sessionInfo?.sessionId,
         state: room.state,
       });
 
