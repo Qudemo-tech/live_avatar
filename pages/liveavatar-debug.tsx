@@ -250,7 +250,7 @@ export default function LivekitDebugPage() {
       }
 
       setRoom(r);
-      log('LIVEKIT', '✅ Connected to LiveKit room', { name: r.name, sid: r.sid });
+      log('LIVEKIT', '✅ Connected to LiveKit room', { name: r.name, sessionId });
       log('SESSION', '=== SESSION ACTIVE - Ready to communicate ===');
 
       // Wire up all event listeners
@@ -761,7 +761,7 @@ export default function LivekitDebugPage() {
       
       log('STATS', 'Room Info', {
         name: room.name,
-        sid: room.sid,
+        sessionId: sessionInfo?.sessionId,
         state: room.state,
       });
 
