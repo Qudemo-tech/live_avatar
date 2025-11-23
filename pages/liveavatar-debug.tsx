@@ -1292,6 +1292,7 @@ export default function LivekitDebugPage() {
           )}
         </div>
       </div>
+
     </div>
   );
 }
