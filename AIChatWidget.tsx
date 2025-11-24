@@ -79,6 +79,13 @@ const TypingText = ({
 
 type WidgetState = "minimized" | "small" | "medium" | "maximized";
 
+type Message = {
+  role: string;
+  content: string;
+  isTyping: boolean;
+  id?: number;
+};
+
 export const AIChatWidget = () => {
   const [state, setState] = useState<WidgetState>("minimized");
   const [showChat, setShowChat] = useState(false);
@@ -91,7 +98,7 @@ export const AIChatWidget = () => {
   const [selectedTime, setSelectedTime] = useState("");
   const [email, setEmail] = useState("");
   const [isMobile, setIsMobile] = useState(false);
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
       content:
@@ -207,6 +214,7 @@ export const AIChatWidget = () => {
         role: "assistant",
         content:
           "Hey, I'm Catherine your Qudemo visual Agent. What brings you to us today?",
+        isTyping: false,
       },
     ]);
     setShowInactivityPrompt(false);
@@ -399,7 +407,6 @@ export const AIChatWidget = () => {
     if (!remoteAudioRef.current) {
       const audioEl = document.createElement("audio");
       audioEl.autoplay = true;
-      audioEl.playsInline = true;
       audioEl.style.display = "none";
       document.body.appendChild(audioEl);
       remoteAudioRef.current = audioEl;
@@ -1529,10 +1536,10 @@ export const AIChatWidget = () => {
                         transition: "color 0.2s ease",
                       }}
                       onMouseEnter={(e) => {
-                        e.target.style.color = "#93c5fd";
+                        (e.target as HTMLElement).style.color = "#93c5fd";
                       }}
                       onMouseLeave={(e) => {
-                        e.target.style.color = "#60a5fa";
+                        (e.target as HTMLElement).style.color = "#60a5fa";
                       }}
                     >
                       Qudemo
