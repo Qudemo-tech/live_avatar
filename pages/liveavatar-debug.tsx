@@ -36,11 +36,17 @@ export default function LivekitDebugPage() {
   const [sessionInfo, setSessionInfo] = useState<any>(null);
   const [showMeetingPopup, setShowMeetingPopup] = useState(false);
   const [detectedIntents, setDetectedIntents] = useState<string[]>([]);
-  const [videoSize, setVideoSize] = useState<'small' | 'medium' | 'large' | 'fullscreen'>('medium');
-  
+  const [isDemoPlaying, setIsDemoPlaying] = useState(false);
+  const [isLogsExpanded, setIsLogsExpanded] = useState(false);
+  const [agentState, setAgentState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
+  const [lastAvatarSpeech, setLastAvatarSpeech] = useState<string>('');
+
   const localAudioRef = useRef<LocalAudioTrack | null>(null);
   const mountedRef = useRef(true);
   const logIdCounter = useRef(0);
+  const demoVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previousAgentStateRef = useRef<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
+  const lastAvatarSpeechRef = useRef<string>('');
 
   useEffect(() => {
     mountedRef.current = true;
@@ -94,34 +100,6 @@ export default function LivekitDebugPage() {
 
   // === INTENT DETECTION SYSTEM ===
   const intentActions: IntentAction[] = [
-    // Screen size control intents
-    {
-      keywords: ['increase screen', 'make bigger', 'full screen', 'maximize', 'larger screen', 'grow screen', 'bigger screen'],
-      action: (transcript, data) => {
-        log('INTENT_DETECTED', '🔼 Screen size increase intent detected!', { transcript });
-        changeVideoSize('fullscreen');
-        setDetectedIntents(prev => [...prev, 'fullscreen'].slice(-10));
-      },
-      description: 'Increase screen size'
-    },
-    {
-      keywords: ['decrease screen', 'make smaller', 'minimize', 'smaller screen', 'shrink screen', 'reduce size'],
-      action: (transcript, data) => {
-        log('INTENT_DETECTED', '🔽 Screen size decrease intent detected!', { transcript });
-        changeVideoSize('small');
-        setDetectedIntents(prev => [...prev, 'small_screen'].slice(-10));
-      },
-      description: 'Decrease screen size'
-    },
-    {
-      keywords: ['normal size', 'default size', 'medium size', 'reset size'],
-      action: (transcript, data) => {
-        log('INTENT_DETECTED', '↔️ Reset screen size intent detected!', { transcript });
-        changeVideoSize('medium');
-        setDetectedIntents(prev => [...prev, 'medium_screen'].slice(-10));
-      },
-      description: 'Reset screen size'
-    },
     // Demo booking intent
     {
       keywords: ['book a demo', 'schedule a demo', 'book demo', 'set up demo', 'arrange demo', 'demo booking'],
@@ -416,6 +394,9 @@ export default function LivekitDebugPage() {
         else if (msgType === 'avatar_transcript' || msgType === 'avatar_speech' || msgType === 'llm_response') {
           const text = parsedJson.text || parsedJson.response || 'N/A';
           log('AVATAR_SPEECH', `💬 Avatar said: "${text}"`, parsedJson);
+          // Store last avatar speech (both ref and state)
+          lastAvatarSpeechRef.current = text;
+          setLastAvatarSpeech(text);
           // Detect intent in avatar speech
           detectIntent(text, parsedJson, 'avatar');
         }
@@ -433,6 +414,9 @@ export default function LivekitDebugPage() {
         } else if (parsedJson.event_type === 'avatar.transcription') {
           const text = parsedJson.text || 'N/A';
           log('AVATAR_SPEECH', `💬 Avatar said: "${text}"`, parsedJson);
+          // Store last avatar speech (both ref and state)
+          lastAvatarSpeechRef.current = text;
+          setLastAvatarSpeech(text);
           // Detect intent
           detectIntent(text, parsedJson, 'avatar');
         } else {
@@ -479,16 +463,30 @@ export default function LivekitDebugPage() {
     r.on(RoomEvent.ParticipantAttributesChanged, (changedAttributes: any, participant: any) => {
       // Check if this is agent state change
       if (changedAttributes && changedAttributes['lk.agent.state']) {
-        const agentState = changedAttributes['lk.agent.state'];
+        const newAgentState = changedAttributes['lk.agent.state'];
         let emoji = '🤖';
-        if (agentState === 'listening') emoji = '👂';
-        else if (agentState === 'thinking') emoji = '🤔';
-        else if (agentState === 'speaking') emoji = '💬';
-        
-        log('AGENT_STATE', `${emoji} Agent is now: ${agentState.toUpperCase()}`, {
+        if (newAgentState === 'listening') emoji = '👂';
+        else if (newAgentState === 'thinking') emoji = '🤔';
+        else if (newAgentState === 'speaking') emoji = '💬';
+
+        log('AGENT_STATE', `${emoji} Agent is now: ${newAgentState.toUpperCase()}`, {
           participant: participant.identity,
-          state: agentState,
+          state: newAgentState,
+          previousState: previousAgentStateRef.current,
         });
+
+        // Check if avatar just finished speaking (transition from speaking to listening)
+        if (previousAgentStateRef.current === 'speaking' && newAgentState === 'listening') {
+          log('AGENT_STATE', '✅ Avatar finished speaking - checking for demo trigger (with 100ms delay)');
+          // Small delay to ensure transcription has arrived
+          setTimeout(() => {
+            checkForDemoTrigger();
+          }, 100);
+        }
+
+        // Update agent state
+        previousAgentStateRef.current = newAgentState;
+        setAgentState(newAgentState);
       } else {
         log('PARTICIPANT', 'ParticipantAttributesChanged', {
           participant: participant.identity,
@@ -607,30 +605,36 @@ export default function LivekitDebugPage() {
         el = document.createElement(track.kind === Track.Kind.Audio ? 'audio' : 'video') as HTMLMediaElement;
         el.id = elId;
         el.autoplay = true;
-        el.controls = true;
-        
+
         if (track.kind === Track.Kind.Video) {
-          const styles = getVideoStyles(videoSize);
-          el.style.maxWidth = styles.maxWidth;
-          el.style.width = styles.width;
-          el.style.border = '2px solid #4CAF50';
-          el.style.borderRadius = '8px';
-          el.style.objectFit = videoSize === 'fullscreen' ? 'contain' : 'cover';
-          if (videoSize === 'fullscreen') {
-            el.style.height = '100vh';
-          }
+          // Video controls and styling
+          el.controls = true;
+          el.style.width = '100%';
+          el.style.height = '100%';
+          el.style.maxWidth = '100%';
+          el.style.border = 'none';
+          el.style.borderRadius = '0';
+          el.style.objectFit = 'contain';
+          el.style.background = '#000';
+        } else {
+          // Audio elements - hide them completely
+          el.controls = false;
+          el.style.display = 'none';
         }
 
         let container = document.getElementById('lk-track-container');
         if (!container) {
           container = document.createElement('div');
           container.id = 'lk-track-container';
-          container.style.display = 'flex';
-          container.style.flexDirection = 'column';
-          container.style.gap = '16px';
-          container.style.padding = '16px';
-          container.style.background = '#f5f5f5';
+          container.style.position = 'relative';
+          container.style.width = '100%';
+          container.style.height = '70vh'; // Cinema mode height
+          container.style.maxWidth = '1400px';
+          container.style.margin = '0 auto';
+          container.style.background = '#000';
           container.style.borderRadius = '8px';
+          container.style.overflow = 'hidden';
+          container.style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
           document.getElementById('media-tracks-section')?.appendChild(container);
         }
         container.appendChild(el);
@@ -854,38 +858,126 @@ export default function LivekitDebugPage() {
     log('SYSTEM', 'Logs cleared');
   }
 
-  function getVideoStyles(size: typeof videoSize) {
-    const styles: Record<typeof videoSize, { maxWidth: string, width: string }> = {
-      small: { maxWidth: '320px', width: '100%' },
-      medium: { maxWidth: '640px', width: '100%' },
-      large: { maxWidth: '960px', width: '100%' },
-      fullscreen: { maxWidth: '100%', width: '100%' },
-    };
-    return styles[size];
+  function checkForDemoTrigger() {
+    // Use ref for immediate access to latest value
+    const speech = lastAvatarSpeechRef.current;
+    const lowerSpeech = speech.toLowerCase();
+    log('DEMO_CHECK', `Checking last avatar speech: "${speech}"`);
+
+    if (lowerSpeech.includes('rendering demo for you') ||
+        lowerSpeech.includes('render demo for you') ||
+        lowerSpeech.includes('rendering the demo') ||
+        lowerSpeech.includes('showing demo') ||
+        lowerSpeech.includes('show you the demo')) {
+      log('DEMO_TRIGGER', '🎬 Demo trigger phrase detected! Starting demo video...');
+      playDemoVideo();
+    } else {
+      log('DEMO_CHECK', '❌ No demo trigger phrase found in avatar speech');
+    }
   }
 
-  function changeVideoSize(newSize: typeof videoSize) {
-    setVideoSize(newSize);
-    log('UI', `Video size changed to: ${newSize}`);
-    
-    // Update existing video elements
-    const container = document.getElementById('lk-track-container');
-    if (container) {
-      const videoElements = container.querySelectorAll('video');
-      const newStyles = getVideoStyles(newSize);
-      
-      videoElements.forEach(video => {
-        video.style.maxWidth = newStyles.maxWidth;
-        video.style.width = newStyles.width;
-        
-        if (newSize === 'fullscreen') {
-          video.style.height = '100vh';
+  function playDemoVideo() {
+    if (isDemoPlaying) {
+      log('DEMO', 'Demo already playing');
+      return;
+    }
+
+    try {
+      log('DEMO', '🎬 Starting demo video playback');
+      setIsDemoPlaying(true);
+
+      // Pause microphone
+      if (room && localAudioRef.current) {
+        log('DEMO', '🎤 Pausing microphone during demo');
+        (room as any).localParticipant.setMicrophoneEnabled(false);
+      }
+
+      // Shrink avatar video to small overlay in bottom-right corner
+      const container = document.getElementById('lk-track-container');
+      if (container) {
+        // Container stays in place
+        container.style.position = 'relative';
+        container.style.transition = 'all 0.5s ease';
+
+        const videoElements = container.querySelectorAll('video');
+        videoElements.forEach(video => {
+          video.style.position = 'absolute';
+          video.style.bottom = '80px';  // Higher up to avoid controls
+          video.style.right = '20px';
+          video.style.width = '200px';  // Small but visible
+          video.style.height = 'auto';  // Maintain aspect ratio
+          video.style.maxWidth = '200px';
+          video.style.borderRadius = '0';  // No rounding - keep original shape
+          video.style.objectFit = 'contain';  // Keep original resolution/aspect
+          video.style.border = '2px solid rgba(255, 255, 255, 0.8)';
+          video.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.6)';
+          video.style.zIndex = '10';
+          video.style.transition = 'all 0.5s ease';
+        });
+      }
+
+      // Play demo video
+      const demoVideo = demoVideoRef.current;
+      if (demoVideo) {
+        demoVideo.play();
+        log('DEMO', '▶️ Demo video playing');
+      }
+
+    } catch (e) {
+      log('ERROR', 'Failed to start demo video', e);
+      setIsDemoPlaying(false);
+    }
+  }
+
+  function stopDemoVideo() {
+    try {
+      log('DEMO', '⏹️ Stopping demo video');
+      setIsDemoPlaying(false);
+
+      // Resume microphone
+      if (room && localAudioRef.current) {
+        log('DEMO', '🎤 Resuming microphone after demo');
+        (room as any).localParticipant.setMicrophoneEnabled(true);
+      }
+
+      // Restore avatar video to normal size
+      const container = document.getElementById('lk-track-container');
+      if (container) {
+        container.style.position = 'relative';
+        container.style.width = '100%';
+        container.style.height = '70vh';
+        container.style.maxWidth = '1400px';
+        container.style.margin = '0 auto';
+        container.style.background = '#000';
+        container.style.borderRadius = '8px';
+        container.style.overflow = 'hidden';
+        container.style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
+
+        const videoElements = container.querySelectorAll('video');
+        videoElements.forEach(video => {
+          video.style.position = 'static';
+          video.style.width = '100%';
+          video.style.height = '100%';
+          video.style.maxWidth = '100%';
+          video.style.border = 'none';
+          video.style.borderRadius = '0';
           video.style.objectFit = 'contain';
-        } else {
-          video.style.height = 'auto';
-          video.style.objectFit = 'cover';
-        }
-      });
+          video.style.background = '#000';
+          video.style.zIndex = 'auto';
+        });
+      }
+
+      // Reset demo video
+      const demoVideo = demoVideoRef.current;
+      if (demoVideo) {
+        demoVideo.pause();
+        demoVideo.currentTime = 0;
+      }
+
+      log('DEMO', '✅ Demo video stopped - avatar restored');
+
+    } catch (e) {
+      log('ERROR', 'Failed to stop demo video', e);
     }
   }
 
@@ -1029,76 +1121,21 @@ export default function LivekitDebugPage() {
         </button>
       </div>
 
-      {/* Video Size Controls */}
-      <div style={{ 
-        marginBottom: '24px', 
-        padding: '16px', 
-        background: '#f5f5f5', 
-        borderRadius: '8px',
-        border: '2px solid #ddd',
-      }}>
-        <strong style={{ marginRight: '16px' }}>📐 Video Size:</strong>
-        <button
-          onClick={() => changeVideoSize('small')}
-          style={{
-            padding: '8px 16px',
-            margin: '0 4px',
-            background: videoSize === 'small' ? '#2196F3' : '#fff',
-            color: videoSize === 'small' ? '#fff' : '#333',
-            border: '2px solid #2196F3',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: videoSize === 'small' ? 'bold' : 'normal',
-          }}
-        >
-          Small (320px)
-        </button>
-        <button
-          onClick={() => changeVideoSize('medium')}
-          style={{
-            padding: '8px 16px',
-            margin: '0 4px',
-            background: videoSize === 'medium' ? '#2196F3' : '#fff',
-            color: videoSize === 'medium' ? '#fff' : '#333',
-            border: '2px solid #2196F3',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: videoSize === 'medium' ? 'bold' : 'normal',
-          }}
-        >
-          Medium (640px)
-        </button>
-        <button
-          onClick={() => changeVideoSize('large')}
-          style={{
-            padding: '8px 16px',
-            margin: '0 4px',
-            background: videoSize === 'large' ? '#2196F3' : '#fff',
-            color: videoSize === 'large' ? '#fff' : '#333',
-            border: '2px solid #2196F3',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: videoSize === 'large' ? 'bold' : 'normal',
-          }}
-        >
-          Large (960px)
-        </button>
-        <button
-          onClick={() => changeVideoSize('fullscreen')}
-          style={{
-            padding: '8px 16px',
-            margin: '0 4px',
-            background: videoSize === 'fullscreen' ? '#2196F3' : '#fff',
-            color: videoSize === 'fullscreen' ? '#fff' : '#333',
-            border: '2px solid #2196F3',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: videoSize === 'fullscreen' ? 'bold' : 'normal',
-          }}
-        >
-          Full Screen
-        </button>
-      </div>
+      {/* Demo Status Display */}
+      {isDemoPlaying && (
+        <div style={{
+          padding: '16px',
+          background: '#e3f2fd',
+          border: '2px solid #2196F3',
+          borderRadius: '8px',
+          marginBottom: '16px',
+        }}>
+          <strong>🎬 Demo Playing</strong>
+          <p style={{ margin: '8px 0 0 0', fontSize: '14px', color: '#555' }}>
+            Microphone paused • Avatar in headshot mode • Logs expandable below
+          </p>
+        </div>
+      )}
 
       {/* Detected Intents Display */}
       {detectedIntents.length > 0 && (
@@ -1242,55 +1279,120 @@ export default function LivekitDebugPage() {
         </div>
       )}
 
-      {/* ===== VIDEO/AUDIO MEDIA ON TOP ===== */}
-      <div id="media-tracks-section" style={{ marginBottom: '24px' }}>
-        {/* Track container will be created dynamically and appear here at the top */}
+      {/* ===== VIDEO CONTAINER (Avatar + Demo Video) ===== */}
+      <div id="media-tracks-section" style={{ marginBottom: '24px', position: 'relative' }}>
+        {/* Avatar track container will be created dynamically here */}
+
+        {/* Demo video overlays inside the same container */}
+        {isDemoPlaying && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '100%',
+            height: '100%',
+            maxWidth: '1400px',
+            zIndex: 5,
+          }}>
+            <video
+              ref={demoVideoRef}
+              src="/demo.mp4"
+              controls
+              autoPlay
+              style={{
+                width: '100%',
+                height: '100%',
+                borderRadius: '8px',
+                border: 'none',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                background: '#000',
+                objectFit: 'contain',
+              }}
+              onEnded={stopDemoVideo}
+              onError={(e) => {
+                log('ERROR', 'Demo video failed to load', e);
+                stopDemoVideo();
+              }}
+            />
+            <button
+              onClick={stopDemoVideo}
+              style={{
+                position: 'absolute',
+                top: '16px',
+                right: '16px',
+                padding: '8px 16px',
+                background: 'rgba(244, 67, 54, 0.95)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '14px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              }}
+            >
+              ⏹️ Stop Demo
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* ===== EVENT LOG - CONTINUOUS PLAIN TEXT FORMAT ===== */}
+      {/* ===== EVENT LOG - EXPANDABLE/COLLAPSIBLE ===== */}
       <div style={{
         border: '2px solid #333',
         borderRadius: '8px',
         overflow: 'hidden',
       }}>
-        <div style={{
-          background: '#333',
-          color: '#fff',
-          padding: '12px 16px',
-          fontWeight: 'bold',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}>
-          <span>Event Log ({logs.length} entries) - Continuous Format</span>
-          <span style={{ fontSize: '12px', color: '#aaa' }}>Select all text to copy everything</span>
-        </div>
-        
-        <div 
-          id="log-container"
+        <div
+          onClick={() => setIsLogsExpanded(!isLogsExpanded)}
           style={{
-            maxHeight: '600px',
-            overflow: 'auto',
-            background: '#1e1e1e',
-            color: '#f0f0f0',
-            fontFamily: 'monospace',
-            fontSize: '13px',
-            padding: '12px',
-            whiteSpace: 'pre-wrap',
-            wordWrap: 'break-word',
+            background: '#333',
+            color: '#fff',
+            padding: '12px 16px',
+            fontWeight: 'bold',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            cursor: 'pointer',
+            userSelect: 'none',
           }}
         >
-          {logs.length === 0 ? (
-            <div style={{ textAlign: 'center', color: '#888', padding: '12px' }}>
-              No logs yet. Click "Start Session" to begin.
-            </div>
-          ) : (
-            logs.map((entry) => {
-              const dataStr = entry.data !== undefined ? '\n' + JSON.stringify(entry.data, null, 2) : '';
-              return `[${entry.category}] ${entry.message}${dataStr}\n\n`;
-            }).join('')
-          )}
+          <span>
+            {isLogsExpanded ? '▼' : '▶'} Live Logs ({logs.length} entries)
+          </span>
+          <span style={{ fontSize: '12px', color: '#aaa' }}>
+            {isLogsExpanded ? 'Click to collapse' : 'Click to expand'}
+          </span>
         </div>
+
+        {isLogsExpanded && (
+          <div
+            id="log-container"
+            style={{
+              maxHeight: '600px',
+              overflow: 'auto',
+              background: '#1e1e1e',
+              color: '#f0f0f0',
+              fontFamily: 'monospace',
+              fontSize: '13px',
+              padding: '12px',
+              whiteSpace: 'pre-wrap',
+              wordWrap: 'break-word',
+            }}
+          >
+            {logs.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#888', padding: '12px' }}>
+                No logs yet. Click "Start Session" to begin.
+              </div>
+            ) : (
+              logs.map((entry) => {
+                const dataStr = entry.data !== undefined ? '\n' + JSON.stringify(entry.data, null, 2) : '';
+                return `[${entry.category}] ${entry.message}${dataStr}\n\n`;
+              }).join('')
+            )}
+          </div>
+        )}
       </div>
 
     </div>

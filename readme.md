@@ -12,7 +12,11 @@ npm install
 cp .env.local.example .env.local
 # Edit .env.local with your credentials
 
-# 3. Run
+# 3. Add Demo Video (Optional)
+# Place your demo video in the public directory
+cp /path/to/your/demo.mp4 public/demo.mp4
+
+# 4. Run
 npm run dev
 ```
 
@@ -89,3 +93,60 @@ streamReady
 
 - **Backend**: Terminal where `npm run dev` is running
 - **Frontend**: Browser console + on-screen debug panel
+
+## Demo Video Playback Feature
+
+### How It Works
+
+The application includes an automatic demo video playback system that triggers when the avatar says specific phrases.
+
+**Trigger Phrases:**
+- "rendering demo for you"
+- "render demo for you"
+- "rendering the demo"
+- "showing demo"
+- "show you the demo"
+
+**State Tracking:**
+- Uses React refs (`previousAgentStateRef`, `lastAvatarSpeechRef`) for immediate value access
+- Avoids React closure issues in event handlers
+- Tracks avatar state: idle → listening → thinking → speaking
+
+**Triggering Process:**
+1. Avatar finishes speaking (state changes from `speaking` to `listening`)
+2. System waits 100ms for transcription to arrive
+3. Checks last avatar speech for trigger phrases
+4. If matched, starts demo video playback
+
+**During Demo:**
+- **Microphone**: Automatically paused (`setMicrophoneEnabled(false)`)
+- **Avatar Video**: Shrinks to 200px overlay in bottom-right corner
+  - No border radius (keeps original shape)
+  - White border with shadow for visibility
+  - Positioned at `bottom: 80px, right: 20px`
+  - `zIndex: 10` to stay above demo video
+- **Demo Video**: Fills the container (cinema mode: 70vh height, 1400px max width)
+  - Overlays at `zIndex: 5`
+- **Logs**: Collapsible/expandable (default collapsed)
+
+**After Demo:**
+- Microphone automatically resumes
+- Avatar video returns to full size
+- Demo video resets to start
+
+**Cinema Mode Layout:**
+- Container: 70vh height, 1400px max width
+- Avatar fills screen by default
+- Demo overlays with avatar floating in corner (YouTube-style)
+
+### Technical Details
+
+**Why Refs + State:**
+- **Refs**: Immediate synchronous access for event handlers
+- **State**: Triggers UI re-renders
+- **100ms Delay**: Ensures transcription arrives before checking
+
+**Audio Elements:**
+- Hidden completely (`display: none`)
+- No visible controls
+- Remain functional in background
