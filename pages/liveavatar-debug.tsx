@@ -36,7 +36,9 @@ export default function LivekitDebugPage() {
   const [sessionInfo, setSessionInfo] = useState<any>(null);
   const [showMeetingPopup, setShowMeetingPopup] = useState(false);
   const [detectedIntents, setDetectedIntents] = useState<string[]>([]);
-  const [videoSize, setVideoSize] = useState<'small' | 'medium' | 'large' | 'fullscreen'>('medium');
+  const [videoSize, setVideoSize] = useState<'small' | 'medium' | 'large' | 'fullscreen'>('fullscreen');
+  const [showLogs, setShowLogs] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   
   const localAudioRef = useRef<LocalAudioTrack | null>(null);
   const mountedRef = useRef(true);
@@ -607,33 +609,76 @@ export default function LivekitDebugPage() {
         el = document.createElement(track.kind === Track.Kind.Audio ? 'audio' : 'video') as HTMLMediaElement;
         el.id = elId;
         el.autoplay = true;
-        el.controls = true;
+        el.setAttribute('playsinline', 'true');
+        el.muted = false;
         
         if (track.kind === Track.Kind.Video) {
+          // Google Meet style video with size control
           const styles = getVideoStyles(videoSize);
-          el.style.maxWidth = styles.maxWidth;
           el.style.width = styles.width;
-          el.style.border = '2px solid #4CAF50';
-          el.style.borderRadius = '8px';
-          el.style.objectFit = videoSize === 'fullscreen' ? 'contain' : 'cover';
-          if (videoSize === 'fullscreen') {
-            el.style.height = '100vh';
-          }
+          el.style.maxWidth = styles.maxWidth;
+          el.style.height = videoSize === 'fullscreen' ? '100%' : 'auto';
+          el.style.objectFit = videoSize === 'fullscreen' ? 'cover' : 'contain';
+          el.style.backgroundColor = '#000';
         }
 
         let container = document.getElementById('lk-track-container');
         if (!container) {
           container = document.createElement('div');
           container.id = 'lk-track-container';
+          container.style.position = 'relative';
+          container.style.width = '100%';
+          container.style.height = '100%';
           container.style.display = 'flex';
-          container.style.flexDirection = 'column';
-          container.style.gap = '16px';
-          container.style.padding = '16px';
-          container.style.background = '#f5f5f5';
-          container.style.borderRadius = '8px';
+          container.style.alignItems = 'center';
+          container.style.justifyContent = 'center';
+          container.style.backgroundColor = '#ffffff';
+          container.style.overflow = 'hidden';
+          
+          const mediaSection = document.getElementById('media-tracks-section');
+          if (mediaSection) {
+            mediaSection.style.width = '100vw';
+            mediaSection.style.height = '100vh';
+            mediaSection.style.position = 'fixed';
+            mediaSection.style.top = '0';
+            mediaSection.style.left = '0';
+            mediaSection.style.zIndex = '1';
+            mediaSection.style.backgroundColor = '#ffffff';
+          }
+          
           document.getElementById('media-tracks-section')?.appendChild(container);
         }
-        container.appendChild(el);
+        
+        // Create video wrapper for Google Meet style
+        const videoWrapper = document.createElement('div');
+        const styles = getVideoStyles(videoSize);
+        videoWrapper.style.position = 'relative';
+        videoWrapper.style.width = styles.width;
+        videoWrapper.style.maxWidth = styles.maxWidth;
+        videoWrapper.style.height = videoSize === 'fullscreen' ? '100%' : 'auto';
+        videoWrapper.style.display = 'flex';
+        videoWrapper.style.alignItems = 'center';
+        videoWrapper.style.justifyContent = 'center';
+        videoWrapper.style.margin = videoSize === 'fullscreen' ? '0' : '0 auto';
+        
+        // Add participant name overlay (Google Meet style)
+        const nameOverlay = document.createElement('div');
+        nameOverlay.style.position = 'absolute';
+        nameOverlay.style.bottom = '16px';
+        nameOverlay.style.left = '16px';
+        nameOverlay.style.background = 'rgba(0, 0, 0, 0.6)';
+        nameOverlay.style.color = 'white';
+        nameOverlay.style.padding = '6px 12px';
+        nameOverlay.style.borderRadius = '4px';
+        nameOverlay.style.fontSize = '14px';
+        nameOverlay.style.fontWeight = '500';
+        nameOverlay.style.zIndex = '10';
+        nameOverlay.textContent = participant.name || participant.identity || 'Avatar';
+        nameOverlay.id = `name-overlay-${track.sid}`;
+        
+        videoWrapper.appendChild(el);
+        videoWrapper.appendChild(nameOverlay);
+        container.appendChild(videoWrapper);
       }
 
       track.attach(el);
@@ -694,6 +739,7 @@ export default function LivekitDebugPage() {
 
       log('LOCAL_AUDIO', 'Publishing local audio track to room');
       await (room as any).localParticipant.publishTrack(localAudioRef.current);
+      setIsMuted(false);
       log('LOCAL_AUDIO', '✅ Local audio published - you can now speak to the avatar');
 
     } catch (e) {
@@ -713,11 +759,22 @@ export default function LivekitDebugPage() {
       
       localAudioRef.current.stop();
       localAudioRef.current = null;
+      setIsMuted(true);
       
       log('LOCAL_AUDIO', '✅ Local audio unpublished and stopped');
 
     } catch (e) {
       log('ERROR', 'Failed to unpublish local audio', e);
+    }
+  }
+
+  async function toggleMute() {
+    if (!room) return;
+    
+    if (localAudioRef.current) {
+      await unpublishLocalAudio();
+    } else {
+      await publishLocalAudio();
     }
   }
 
@@ -868,259 +925,296 @@ export default function LivekitDebugPage() {
     setVideoSize(newSize);
     log('UI', `Video size changed to: ${newSize}`);
     
-    // Update existing video elements
+    // Update existing video elements with new size
     const container = document.getElementById('lk-track-container');
     if (container) {
-      const videoElements = container.querySelectorAll('video');
-      const newStyles = getVideoStyles(newSize);
+      const videoWrappers = container.querySelectorAll('div[style*="position: relative"]');
+      const styles = getVideoStyles(newSize);
       
-      videoElements.forEach(video => {
-        video.style.maxWidth = newStyles.maxWidth;
-        video.style.width = newStyles.width;
-        
-        if (newSize === 'fullscreen') {
-          video.style.height = '100vh';
-          video.style.objectFit = 'contain';
-        } else {
-          video.style.height = 'auto';
-          video.style.objectFit = 'cover';
+      videoWrappers.forEach((wrapper: any) => {
+        if (wrapper.style) {
+          wrapper.style.width = styles.width;
+          wrapper.style.maxWidth = styles.maxWidth;
+          wrapper.style.margin = newSize === 'fullscreen' ? '0' : '0 auto';
+        }
+      });
+      
+      const videoElements = container.querySelectorAll('video');
+      videoElements.forEach((video: any) => {
+        if (video.style) {
+          video.style.width = styles.width;
+          video.style.maxWidth = styles.maxWidth;
+          video.style.objectFit = newSize === 'fullscreen' ? 'cover' : 'contain';
+          video.style.height = newSize === 'fullscreen' ? '100%' : 'auto';
         }
       });
     }
   }
 
   return (
-    <div id="main-container" style={{ padding: '24px', fontFamily: 'system-ui, sans-serif' }}>
-      <h1 style={{ marginBottom: '8px' }}>HeyGen LiveAvatar Debug Console</h1>
-      <p style={{ color: '#666', marginBottom: '24px' }}>
-        Comprehensive logging for LiveKit room events and data channel communication
-      </p>
-
-      {/* Session Info Display */}
-      {sessionInfo && (
-        <div style={{
-          padding: '16px',
-          background: '#e8f5e9',
-          border: '2px solid #4CAF50',
-          borderRadius: '8px',
-          marginBottom: '16px',
+    <>
+      <style>{`
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        body {
+          overflow: hidden;
+        }
+        #lk-track-container video {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover;
+          background: #000;
+        }
+      `}</style>
+      <div id="main-container" style={{ 
+        width: '100vw', 
+        height: '100vh', 
+        overflow: 'hidden',
+        fontFamily: 'Google Sans, Roboto, Arial, sans-serif',
+        backgroundColor: '#ffffff',
+        position: 'relative',
+        display: !room ? 'flex' : 'block',
+        alignItems: !room ? 'center' : 'normal',
+        justifyContent: !room ? 'center' : 'normal',
         }}>
-          <strong>Active Session:</strong>
-          <div style={{ marginTop: '8px', fontSize: '14px', fontFamily: 'monospace' }}>
-            <div>Session ID: {sessionInfo.sessionId}</div>
-            <div>LiveKit URL: {sessionInfo.livekitUrl}</div>
+      {/* Google Meet Style Video Container */}
+      <div id="media-tracks-section" style={{ 
+        width: '100%', 
+        height: '100%',
+        position: 'relative',
+        backgroundColor: '#ffffff',
+      }}>
+        {/* Track container will be created dynamically */}
           </div>
+
+      {/* Connect Button - Centered on Black Background (when not connected) */}
+      {!room && (
+        <div style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          zIndex: 1000,
+        }}>
+          <button
+            onClick={startSession}
+            disabled={isConnecting}
+            style={{
+              padding: '12px 32px',
+              fontSize: '16px',
+              fontWeight: '500',
+              background: isConnecting ? '#5f6368' : '#1a73e8',
+              color: 'white',
+              border: 'none',
+              borderRadius: '24px',
+              cursor: isConnecting ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s',
+              boxShadow: isConnecting ? 'none' : '0 2px 4px rgba(0,0,0,0.2)',
+            }}
+            onMouseEnter={(e) => {
+              if (!isConnecting) e.currentTarget.style.background = '#1557b0';
+            }}
+            onMouseLeave={(e) => {
+              if (!isConnecting) e.currentTarget.style.background = '#1a73e8';
+            }}
+          >
+            {isConnecting ? 'Preparing...' : 'Connect'}
+          </button>
         </div>
       )}
 
-      {/* Control Buttons */}
-      <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-        <button
-          onClick={startSession}
-          disabled={isConnecting || !!room}
-          style={{
-            padding: '12px 24px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            background: room ? '#ccc' : '#4CAF50',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: room ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {isConnecting ? 'Connecting...' : room ? 'Connected' : 'Start Session'}
-        </button>
+      {/* Google Meet Style Controls Bar at Bottom (when connected) */}
+      {room && (
+      <div style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '80px',
+        backgroundColor: '#ffffff',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        borderTop: '1px solid rgba(0, 0, 0, 0.1)',
+        padding: '0 24px',
+        boxShadow: '0 -2px 8px rgba(0, 0, 0, 0.1)',
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          width: '100%',
+          justifyContent: 'center',
+        }}>
 
+          {/* Mute/Unmute Button */}
+          {room && (
         <button
-          onClick={publishLocalAudio}
-          disabled={!room}
+              onClick={toggleMute}
           style={{
-            padding: '12px 24px',
-            fontSize: '16px',
-            background: !room ? '#ccc' : '#2196F3',
-            color: 'white',
+                width: '48px',
+                height: '48px',
+                borderRadius: '50%',
             border: 'none',
-            borderRadius: '6px',
-            cursor: !room ? 'not-allowed' : 'pointer',
-          }}
-        >
-          🎤 Start Speaking
-        </button>
-
-        <button
-          onClick={unpublishLocalAudio}
-          disabled={!room || !localAudioRef.current}
-          style={{
-            padding: '12px 24px',
-            fontSize: '16px',
-            background: !room || !localAudioRef.current ? '#ccc' : '#FF9800',
+                background: isMuted || !localAudioRef.current ? '#1a73e8' : '#5f6368',
             color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: !room || !localAudioRef.current ? 'not-allowed' : 'pointer',
-          }}
-        >
-          🔇 Stop Speaking
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+              title={isMuted || !localAudioRef.current ? 'Unmute' : 'Mute'}
+            >
+              <svg 
+                width="24" 
+                height="24" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                xmlns="http://www.w3.org/2000/svg"
+                style={{ width: '24px', height: '24px' }}
+              >
+                <path 
+                  d="M12 14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2s-2 .9-2 2v7c0 1.1.9 2 2 2z" 
+                  fill="currentColor"
+                />
+                <path 
+                  d="M19 10v1c0 3.9-3.1 7-7 7s-7-3.1-7-7v-1h2v1c0 2.8 2.2 5 5 5s5-2.2 5-5v-1h2z" 
+                  fill="currentColor"
+                />
+                <path 
+                  d="M11 22h2v-2.07c3.39-.49 6-3.39 6-6.93h-2c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.54 2.61 6.44 6 6.93V22z" 
+                  fill="currentColor"
+                />
+              </svg>
         </button>
+          )}
 
-        <button
-          onClick={sendTestData}
-          disabled={!room}
-          style={{
-            padding: '12px 24px',
-            fontSize: '16px',
-            background: !room ? '#ccc' : '#9C27B0',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: !room ? 'not-allowed' : 'pointer',
-          }}
-        >
-          📨 Send Test Data
-        </button>
-
-        <button
-          onClick={getRoomStats}
-          disabled={!room}
-          style={{
-            padding: '12px 24px',
-            fontSize: '16px',
-            background: !room ? '#ccc' : '#607D8B',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: !room ? 'not-allowed' : 'pointer',
-          }}
-        >
-          📊 Get Stats
-        </button>
-
+          {/* End Call Button */}
+          {room && (
         <button
           onClick={endSession}
-          disabled={!room}
           style={{
-            padding: '12px 24px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            background: !room ? '#ccc' : '#f44336',
-            color: 'white',
+                width: '48px',
+                height: '48px',
+                borderRadius: '50%',
             border: 'none',
-            borderRadius: '6px',
-            cursor: !room ? 'not-allowed' : 'pointer',
-          }}
-        >
-          ❌ End Session
-        </button>
-
-        <button
-          onClick={clearLogs}
-          style={{
-            padding: '12px 24px',
-            fontSize: '16px',
-            background: '#9E9E9E',
+                background: '#1a73e8',
             color: 'white',
-            border: 'none',
-            borderRadius: '6px',
             cursor: 'pointer',
-          }}
-        >
-          🗑️ Clear Logs
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.1)';
+                e.currentTarget.style.background = '#1557b0';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.background = '#1a73e8';
+              }}
+              title="End call"
+            >
+              📞
         </button>
+          )}
+        </div>
       </div>
+      )}
 
-      {/* Video Size Controls */}
-      <div style={{ 
-        marginBottom: '24px', 
-        padding: '16px', 
-        background: '#f5f5f5', 
-        borderRadius: '8px',
-        border: '2px solid #ddd',
-      }}>
-        <strong style={{ marginRight: '16px' }}>📐 Video Size:</strong>
-        <button
-          onClick={() => changeVideoSize('small')}
-          style={{
-            padding: '8px 16px',
-            margin: '0 4px',
-            background: videoSize === 'small' ? '#2196F3' : '#fff',
-            color: videoSize === 'small' ? '#fff' : '#333',
-            border: '2px solid #2196F3',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: videoSize === 'small' ? 'bold' : 'normal',
-          }}
-        >
-          Small (320px)
-        </button>
-        <button
-          onClick={() => changeVideoSize('medium')}
-          style={{
-            padding: '8px 16px',
-            margin: '0 4px',
-            background: videoSize === 'medium' ? '#2196F3' : '#fff',
-            color: videoSize === 'medium' ? '#fff' : '#333',
-            border: '2px solid #2196F3',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: videoSize === 'medium' ? 'bold' : 'normal',
-          }}
-        >
-          Medium (640px)
-        </button>
-        <button
-          onClick={() => changeVideoSize('large')}
-          style={{
-            padding: '8px 16px',
-            margin: '0 4px',
-            background: videoSize === 'large' ? '#2196F3' : '#fff',
-            color: videoSize === 'large' ? '#fff' : '#333',
-            border: '2px solid #2196F3',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: videoSize === 'large' ? 'bold' : 'normal',
-          }}
-        >
-          Large (960px)
-        </button>
-        <button
-          onClick={() => changeVideoSize('fullscreen')}
-          style={{
-            padding: '8px 16px',
-            margin: '0 4px',
-            background: videoSize === 'fullscreen' ? '#2196F3' : '#fff',
-            color: videoSize === 'fullscreen' ? '#fff' : '#333',
-            border: '2px solid #2196F3',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: videoSize === 'fullscreen' ? 'bold' : 'normal',
-          }}
-        >
-          Full Screen
-        </button>
-      </div>
+      {/* Video Size Selection Controls */}
+      {room && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          background: 'rgba(255, 255, 255, 0.95)',
+          borderRadius: '8px',
+          padding: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+          zIndex: 1001,
+          display: 'flex',
+          gap: '8px',
+          alignItems: 'center',
+        }}>
+          <span style={{ fontSize: '12px', fontWeight: '500', color: '#5f6368', marginRight: '4px' }}>
+            Size:
+          </span>
+          {(['small', 'medium', 'large', 'fullscreen'] as const).map((size) => (
+            <button
+              key={size}
+              onClick={() => changeVideoSize(size)}
+              style={{
+                padding: '6px 12px',
+                fontSize: '11px',
+                background: videoSize === size ? '#1a73e8' : '#f1f3f4',
+                color: videoSize === size ? 'white' : '#5f6368',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: videoSize === size ? '500' : '400',
+                transition: 'all 0.2s',
+                textTransform: 'capitalize',
+              }}
+              onMouseEnter={(e) => {
+                if (videoSize !== size) {
+                  e.currentTarget.style.background = '#e8eaed';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (videoSize !== size) {
+                  e.currentTarget.style.background = '#f1f3f4';
+                }
+              }}
+              title={size === 'fullscreen' ? 'Full Screen' : `${size.charAt(0).toUpperCase() + size.slice(1)} (${size === 'small' ? '320px' : size === 'medium' ? '640px' : '960px'})`}
+            >
+              {size === 'fullscreen' ? 'Full' : size.charAt(0).toUpperCase() + size.slice(1)}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* Detected Intents Display */}
+      {/* Detected Intents - Floating Badge (Google Meet Style) */}
       {detectedIntents.length > 0 && (
         <div style={{
-          padding: '16px',
-          background: '#fff3e0',
-          border: '2px solid #FF9800',
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          background: 'rgba(255, 255, 255, 0.95)',
           borderRadius: '8px',
-          marginBottom: '16px',
+          padding: '12px 16px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+          zIndex: 1001,
+          maxWidth: '300px',
         }}>
-          <strong>🎯 Detected Intents:</strong>
-          <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {detectedIntents.map((intent, idx) => (
+          <div style={{ fontSize: '12px', fontWeight: '500', marginBottom: '8px', color: '#5f6368' }}>
+            Detected Actions:
+          </div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {detectedIntents.slice(-3).map((intent, idx) => (
               <span
                 key={idx}
                 style={{
-                  padding: '4px 12px',
-                  background: '#FF9800',
+                  padding: '4px 10px',
+                  background: '#1a73e8',
                   color: 'white',
-                  borderRadius: '12px',
-                  fontSize: '12px',
-                  fontWeight: 'bold',
+                  borderRadius: '16px',
+                  fontSize: '11px',
+                  fontWeight: '500',
                 }}
               >
                 {intent.replace('_', ' ')}
@@ -1242,39 +1336,74 @@ export default function LivekitDebugPage() {
         </div>
       )}
 
-      {/* ===== VIDEO/AUDIO MEDIA ON TOP ===== */}
-      <div id="media-tracks-section" style={{ marginBottom: '24px' }}>
-        {/* Track container will be created dynamically and appear here at the top */}
-      </div>
-
-      {/* ===== EVENT LOG - CONTINUOUS PLAIN TEXT FORMAT ===== */}
+      {/* Collapsible Event Log Panel (Google Meet Style) */}
+      {showLogs && (
       <div style={{
-        border: '2px solid #333',
+          position: 'fixed',
+          bottom: '100px',
+          right: '20px',
+          width: '400px',
+          maxHeight: '500px',
+          backgroundColor: '#fff',
         borderRadius: '8px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+          zIndex: 1001,
+          display: 'flex',
+          flexDirection: 'column',
         overflow: 'hidden',
       }}>
         <div style={{
-          background: '#333',
+            background: '#1a73e8',
           color: '#fff',
           padding: '12px 16px',
-          fontWeight: 'bold',
+            fontWeight: '500',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+            fontSize: '14px',
         }}>
-          <span>Event Log ({logs.length} entries) - Continuous Format</span>
-          <span style={{ fontSize: '12px', color: '#aaa' }}>Select all text to copy everything</span>
+            <span>Event Log ({logs.length})</span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={clearLogs}
+                style={{
+                  background: 'rgba(255,255,255,0.2)',
+                  border: 'none',
+                  color: 'white',
+                  padding: '4px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setShowLogs(false)}
+                style={{
+                  background: 'rgba(255,255,255,0.2)',
+                  border: 'none',
+                  color: 'white',
+                  padding: '4px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
         </div>
         
         <div 
           id="log-container"
           style={{
-            maxHeight: '600px',
+              flex: 1,
             overflow: 'auto',
             background: '#1e1e1e',
             color: '#f0f0f0',
             fontFamily: 'monospace',
-            fontSize: '13px',
+              fontSize: '11px',
             padding: '12px',
             whiteSpace: 'pre-wrap',
             wordWrap: 'break-word',
@@ -1282,7 +1411,7 @@ export default function LivekitDebugPage() {
         >
           {logs.length === 0 ? (
             <div style={{ textAlign: 'center', color: '#888', padding: '12px' }}>
-              No logs yet. Click "Start Session" to begin.
+                No logs yet. Click "Join Meeting" to begin.
             </div>
           ) : (
             logs.map((entry) => {
@@ -1292,7 +1421,122 @@ export default function LivekitDebugPage() {
           )}
         </div>
       </div>
+      )}
+
+      {/* Meeting/Demo Booking Popup Modal (Google Meet Style) */}
+      {showMeetingPopup && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+        }}>
+          <div style={{
+            background: 'white',
+            padding: '32px',
+            borderRadius: '12px',
+            maxWidth: '500px',
+            width: '90%',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+          }}>
+            <h2 style={{ marginTop: 0, marginBottom: '16px', color: '#202124', fontSize: '24px', fontWeight: '400' }}>
+              Schedule a Demo
+            </h2>
+            <p style={{ color: '#5f6368', marginBottom: '24px', fontSize: '14px' }}>
+              Great! Let's schedule a time to show you how our product works.
+            </p>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <input
+                type="text"
+                placeholder="Your Name"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  fontSize: '14px',
+                  border: '1px solid #dadce0',
+                  borderRadius: '4px',
+                  marginBottom: '12px',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <input
+                type="email"
+                placeholder="Your Email"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  fontSize: '14px',
+                  border: '1px solid #dadce0',
+                  borderRadius: '4px',
+                  marginBottom: '12px',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <input
+                type="tel"
+                placeholder="Phone Number (optional)"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  fontSize: '14px',
+                  border: '1px solid #dadce0',
+                  borderRadius: '4px',
+                  boxSizing: 'border-box',
+                }}
+              />
     </div>
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setShowMeetingPopup(false);
+                  log('UI', 'Demo booking popup closed');
+                }}
+                style={{
+                  padding: '10px 24px',
+                  fontSize: '14px',
+                  background: 'transparent',
+                  color: '#1a73e8',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowMeetingPopup(false);
+                  log('UI', 'Demo booking submitted');
+                  alert('Demo booking submitted! (This would integrate with your calendar system)');
+                }}
+                style={{
+                  padding: '10px 24px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  background: '#1a73e8',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                }}
+              >
+                Schedule
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
+    </>
   );
 }
 
