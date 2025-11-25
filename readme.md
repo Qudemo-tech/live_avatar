@@ -98,34 +98,56 @@ streamReady
 
 ### How It Works
 
-The application includes an automatic demo video playback system that triggers when the avatar says specific phrases. Video triggers are configured in `/config/video-triggers.json`.
+The application includes an intelligent demo video playback system that triggers when the avatar says specific phrases. It uses **token-based keyword matching** to determine which video to play based on company names mentioned. Video triggers are configured in `/config/video-triggers.json`.
 
 **Configuration:**
 
-Edit `/config/video-triggers.json` to add video URLs with their trigger keywords:
+Edit `/config/video-triggers.json` to configure video URLs with primary and secondary keywords:
 
 ```json
 {
   "triggers": [
     {
-      "id": "demo-video",
-      "keywords": [
-        "rendering demo for you",
-        "render demo for you",
-        "rendering the demo",
-        "showing demo",
-        "show you the demo"
-      ],
-      "videoUrl": "https://storage.googleapis.com/your-bucket/demo.mp4",
-      "description": "Main demo video"
+      "id": "nvidia-demo",
+      "primaryKeywords": ["rendering", "render", "demo"],
+      "secondaryKeywords": ["nvidia", "gpu"],
+      "videoUrl": "https://storage.googleapis.com/video_db/nvidia.mp4",
+      "description": "Nvidia-specific demo"
+    },
+    {
+      "id": "microsoft-demo",
+      "primaryKeywords": ["rendering", "render", "demo"],
+      "secondaryKeywords": ["microsoft", "enterprise"],
+      "videoUrl": "https://storage.googleapis.com/video_db/microsoft.mp4",
+      "description": "Microsoft-specific demo"
+    },
+    {
+      "id": "generic-demo",
+      "primaryKeywords": ["rendering", "render", "demo"],
+      "secondaryKeywords": [],
+      "videoUrl": "https://storage.googleapis.com/video_db/demo.mp4",
+      "description": "Generic demo (fallback)"
     }
   ]
 }
 ```
 
+**Keyword Matching Logic:**
+
+1. **Primary Keywords**: Must contain "rendering" (or "render") AND "demo"
+2. **Secondary Keywords**: Company-specific identifiers (nvidia, microsoft, apple, google)
+3. **Fallback**: If no secondary keywords match, plays generic demo
+
+**Examples:**
+
+- Avatar says: "rendering demo right now" → Plays **generic demo** (no company)
+- Avatar says: "rendering nvidia demo" → Plays **Nvidia demo**
+- Avatar says: "nvidia rendering demo" → Plays **Nvidia demo** (word order doesn't matter)
+- Avatar says: "rendering demo for google workspace" → Plays **Google demo**
+
 **Adding More Videos:**
 
-Simply add more trigger objects to support multiple videos. The system will match keywords and play the corresponding video from the public GCS URL.
+Add new trigger objects with unique secondary keywords. The system matches company names to play the correct video.
 
 **State Tracking:**
 - Uses React refs (`previousAgentStateRef`, `lastAvatarSpeechRef`) for immediate value access
@@ -174,5 +196,13 @@ Simply add more trigger objects to support multiple videos. The system will matc
 **Video Source:**
 - Videos are loaded from public GCS URLs configured in `/config/video-triggers.json`
 - No local video storage required
-- Supports multiple videos with different trigger phrases
+- Supports multiple videos with company-specific triggers
 - Uses `preload="metadata"` for faster startup
+
+**Token-Based Matching:**
+- Speech is tokenized (split into words)
+- Word order doesn't matter: "nvidia demo rendering" = "rendering nvidia demo"
+- Case-insensitive matching
+- Filler words are ignored: "rendering demo for you" works perfectly
+- First company match wins (if multiple company names present)
+- Generic demo is fallback when no company keywords detected

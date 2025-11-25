@@ -1,16 +1,39 @@
 {
   "triggers": [
     {
-      "id": "demo-video",
-      "keywords": [
-        "rendering demo for you",
-        "render demo for you",
-        "rendering the demo",
-        "showing demo",
-        "show you the demo"
-      ],
+      "id": "nvidia-demo",
+      "primaryKeywords": ["rendering", "render", "demo"],
+      "secondaryKeywords": ["nvidia", "gpu"],
+      "videoUrl": "https://storage.googleapis.com/video_db/nvidia.mp4",
+      "description": "Nvidia-specific demo"
+    },
+    {
+      "id": "microsoft-demo",
+      "primaryKeywords": ["rendering", "render", "demo"],
+      "secondaryKeywords": ["microsoft", "enterprise"],
+      "videoUrl": "https://storage.googleapis.com/video_db/microsoft.mp4",
+      "description": "Microsoft-specific demo"
+    },
+    {
+      "id": "apple-demo",
+      "primaryKeywords": ["rendering", "render", "demo"],
+      "secondaryKeywords": ["apple", "ios", "macos"],
+      "videoUrl": "https://storage.googleapis.com/video_db/apple.mp4",
+      "description": "Apple-specific demo"
+    },
+    {
+      "id": "google-demo",
+      "primaryKeywords": ["rendering", "render", "demo"],
+      "secondaryKeywords": ["google", "search", "workspace"],
+      "videoUrl": "https://storage.googleapis.com/video_db/google.mp4",
+      "description": "Google-specific demo"
+    },
+    {
+      "id": "generic-demo",
+      "primaryKeywords": ["rendering", "render", "demo"],
+      "secondaryKeywords": [],
       "videoUrl": "https://storage.googleapis.com/video_db/demo.mp4",
-      "description": "Main demo video"
+      "description": "Generic demo (fallback)"
     }
   ]
 }

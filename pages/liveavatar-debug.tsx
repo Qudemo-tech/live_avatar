@@ -896,25 +896,62 @@ export default function LivekitDebugPage() {
     // Use ref for immediate access to latest value
     const speech = lastAvatarSpeechRef.current;
     const lowerSpeech = speech.toLowerCase();
-    log('DEMO_CHECK', `Checking last avatar speech: "${speech}"`);
+    const tokens = lowerSpeech.split(/\s+/); // Split into words
 
-    // Loop through all video triggers from config
+    log('DEMO_CHECK', `Checking last avatar speech: "${speech}"`, { tokens });
+
+    // Step 1: Check for primary keywords (rendering/render AND demo)
+    const hasRenderingKeyword = (videoTriggers.triggers[0] as any).primaryKeywords
+      .slice(0, 2) // "rendering" or "render"
+      .some((kw: string) => tokens.includes(kw));
+
+    const hasDemoKeyword = tokens.includes('demo');
+
+    if (!hasRenderingKeyword || !hasDemoKeyword) {
+      log('DEMO_CHECK', '❌ Missing primary keywords (rendering/render + demo)');
+      return;
+    }
+
+    log('DEMO_CHECK', '✅ Primary keywords found, checking for company match...');
+
+    // Step 2: Check for company-specific keywords
     for (const trigger of videoTriggers.triggers) {
-      const matched = trigger.keywords.some(keyword =>
-        lowerSpeech.includes(keyword.toLowerCase())
+      const secondaryKeywords = (trigger as any).secondaryKeywords || [];
+
+      // Skip generic demo for now (check it last)
+      if (secondaryKeywords.length === 0) continue;
+
+      // Check if any secondary keyword (company name) is present
+      const hasCompanyKeyword = secondaryKeywords.some((kw: string) =>
+        tokens.includes(kw.toLowerCase())
       );
 
-      if (matched) {
-        log('DEMO_TRIGGER', `🎬 Demo trigger phrase detected! (${trigger.id})`, {
-          matchedKeywords: trigger.keywords.filter(k => lowerSpeech.includes(k.toLowerCase())),
+      if (hasCompanyKeyword) {
+        const matchedKeywords = secondaryKeywords.filter((kw: string) =>
+          tokens.includes(kw.toLowerCase())
+        );
+        log('DEMO_TRIGGER', `🎬 Company-specific demo detected! (${trigger.id})`, {
+          matchedKeywords,
           videoUrl: trigger.videoUrl,
         });
         playDemoVideo(trigger.videoUrl);
-        return; // Stop checking after first match
+        return; // First match wins
       }
     }
 
-    log('DEMO_CHECK', '❌ No demo trigger phrase found in avatar speech');
+    // Step 3: No company match → play generic demo
+    const genericTrigger = videoTriggers.triggers.find(t =>
+      ((t as any).secondaryKeywords || []).length === 0
+    );
+
+    if (genericTrigger) {
+      log('DEMO_TRIGGER', '🎬 Generic demo triggered (no company specified)', {
+        videoUrl: genericTrigger.videoUrl,
+      });
+      playDemoVideo(genericTrigger.videoUrl);
+    } else {
+      log('DEMO_CHECK', '❌ No generic demo fallback found in config');
+    }
   }
 
   function playDemoVideo(videoUrl: string) {
