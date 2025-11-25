@@ -12,12 +12,9 @@ import {
 } from 'livekit-client';
 import videoTriggersData from '../config/video-triggers.json';
 import { VideoTriggersConfig, ExtendedRoom, AgentState } from '../lib/types';
+import { RENDERING_KEYWORDS, DEMO_KEYWORD } from '../lib/constants';
 
 const videoTriggers = videoTriggersData as VideoTriggersConfig;
-
-// Constants for keyword matching
-const RENDERING_KEYWORDS = ['rendering', 'render'];
-const DEMO_KEYWORD = 'demo';
 
 /**
  * LiveAvatar Debug Page - Enhanced Verbose Logging
