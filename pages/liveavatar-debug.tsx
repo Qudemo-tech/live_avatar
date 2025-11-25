@@ -12,7 +12,9 @@ import {
 } from 'livekit-client';
 import videoTriggersData from '../config/video-triggers.json';
 import { VideoTriggersConfig, ExtendedRoom, AgentState } from '../lib/types';
-import { RENDERING_KEYWORDS, DEMO_KEYWORD } from '../lib/constants';
+import { checkForDemoTrigger as checkTrigger } from '../lib/videoTriggerMatcher';
+import { useEventLogger } from '../hooks/useEventLogger';
+import { useDemoVideo } from '../hooks/useDemoVideo';
 
 const videoTriggers = videoTriggersData as VideoTriggersConfig;
 
@@ -21,13 +23,6 @@ const videoTriggers = videoTriggersData as VideoTriggersConfig;
  * Full visibility into all LiveKit events and data channel communication
  */
 
-interface LogEntry {
-  id: number;
-  category: string;
-  message: string;
-  data?: any;
-}
-
 interface IntentAction {
   keywords: string[];
   action: (transcript: string, fullData: any) => void;
@@ -35,22 +30,25 @@ interface IntentAction {
 }
 
 export default function LivekitDebugPage() {
+  const { logs, log, clearLogs } = useEventLogger();
+
   const [room, setRoom] = useState<Room | null>(null);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isConnecting, setIsConnecting] = useState(false);
   const [sessionInfo, setSessionInfo] = useState<any>(null);
   const [showMeetingPopup, setShowMeetingPopup] = useState(false);
   const [detectedIntents, setDetectedIntents] = useState<string[]>([]);
-  const [isDemoPlaying, setIsDemoPlaying] = useState(false);
   const [isLogsExpanded, setIsLogsExpanded] = useState(false);
-  const [currentVideoUrl, setCurrentVideoUrl] = useState<string>('');
 
   const localAudioRef = useRef<LocalAudioTrack | null>(null);
   const mountedRef = useRef(true);
-  const logIdCounter = useRef(0);
-  const demoVideoRef = useRef<HTMLVideoElement | null>(null);
   const previousAgentStateRef = useRef<AgentState>('idle');
   const lastAvatarSpeechRef = useRef<string>('');
+
+  const { isDemoPlaying, currentVideoUrl, demoVideoRef, playDemoVideo, stopDemoVideo } = useDemoVideo({
+    room,
+    localAudioRef,
+    log,
+  });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -82,57 +80,6 @@ export default function LivekitDebugPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Effect to handle video loading when demo starts playing
-  useEffect(() => {
-    if (isDemoPlaying && currentVideoUrl && demoVideoRef.current) {
-      const demoVideo = demoVideoRef.current;
-      log('DEMO', '📹 Setting video source in effect', { videoUrl: currentVideoUrl });
-
-      demoVideo.src = currentVideoUrl;
-      demoVideo.load();
-
-      // Wait for video to be ready before playing
-      demoVideo.addEventListener('loadeddata', () => {
-        log('DEMO', '✅ Video loaded - attempting play');
-      }, { once: true });
-
-      demoVideo.addEventListener('canplay', () => {
-        log('DEMO', '✅ Video ready to play');
-      }, { once: true });
-
-      const playPromise = demoVideo.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            log('DEMO', '▶️ Demo video playing from GCS');
-          })
-          .catch((error) => {
-            log('ERROR', 'Video play failed', { error: error.message, videoUrl: currentVideoUrl });
-            setIsDemoPlaying(false);
-          });
-      }
-    }
-  }, [isDemoPlaying, currentVideoUrl]);
-
-  function log(category: string, message: string, data?: any) {
-    const entry: LogEntry = {
-      id: logIdCounter.current++,
-      category,
-      message,
-      data: data !== undefined ? data : undefined,
-    };
-    
-    setLogs(prev => [entry, ...prev].slice(0, 1000)); // Keep last 1000 logs
-    
-    // Also log to console for developer tools
-    const prefix = `[${category}]`;
-    if (data !== undefined) {
-      console.log(prefix, message, data);
-    } else {
-      console.log(prefix, message);
-    }
-  }
 
   // === INTENT DETECTION SYSTEM ===
   const intentActions: IntentAction[] = [
@@ -886,171 +833,12 @@ export default function LivekitDebugPage() {
     }
   }
 
-  function clearLogs() {
-    setLogs([]);
-    log('SYSTEM', 'Logs cleared');
-  }
-
   function checkForDemoTrigger() {
-    // Use ref for immediate access to latest value
     const speech = lastAvatarSpeechRef.current;
-    const lowerSpeech = speech.toLowerCase();
-    // Split into words and strip punctuation
-    const tokens = lowerSpeech.split(/\s+/).map(word => word.replace(/[.,!?;:]/g, ''));
+    const result = checkTrigger(speech, videoTriggers, log);
 
-    log('DEMO_CHECK', `Checking last avatar speech: "${speech}"`, { tokens });
-
-    // Step 1: Check for primary keywords (rendering/render AND demo)
-    const hasRenderingKeyword = RENDERING_KEYWORDS.some(kw => tokens.includes(kw));
-    const hasDemoKeyword = tokens.includes(DEMO_KEYWORD);
-
-    if (!hasRenderingKeyword || !hasDemoKeyword) {
-      log('DEMO_CHECK', '❌ Missing primary keywords (rendering/render + demo)');
-      return;
-    }
-
-    log('DEMO_CHECK', '✅ Primary keywords found, checking for company match...');
-
-    // Step 2: Check for company-specific keywords
-    for (const trigger of videoTriggers.triggers) {
-      const secondaryKeywords = trigger.secondaryKeywords;
-
-      // Skip generic demo for now (check it last)
-      if (secondaryKeywords.length === 0) continue;
-
-      // Check if any secondary keyword (company name) is present
-      const hasCompanyKeyword = secondaryKeywords.some(kw =>
-        tokens.includes(kw.toLowerCase())
-      );
-
-      if (hasCompanyKeyword) {
-        const matchedKeywords = secondaryKeywords.filter(kw =>
-          tokens.includes(kw.toLowerCase())
-        );
-        log('DEMO_TRIGGER', `🎬 Company-specific demo detected! (${trigger.id})`, {
-          matchedKeywords,
-          videoUrl: trigger.videoUrl,
-        });
-        playDemoVideo(trigger.videoUrl);
-        return; // First match wins
-      }
-    }
-
-    // Step 3: No company match → play generic demo
-    const genericTrigger = videoTriggers.triggers.find(t =>
-      t.secondaryKeywords.length === 0
-    );
-
-    if (genericTrigger) {
-      log('DEMO_TRIGGER', '🎬 Generic demo triggered (no company specified)', {
-        videoUrl: genericTrigger.videoUrl,
-      });
-      playDemoVideo(genericTrigger.videoUrl);
-    } else {
-      log('DEMO_CHECK', '❌ No generic demo fallback found in config');
-    }
-  }
-
-  function playDemoVideo(videoUrl: string) {
-    if (isDemoPlaying) {
-      log('DEMO', 'Demo already playing');
-      return;
-    }
-
-    try {
-      log('DEMO', '🎬 Starting demo video playback', { videoUrl });
-
-      // Pause microphone
-      if (room && localAudioRef.current) {
-        log('DEMO', '🎤 Pausing microphone during demo');
-        (room as ExtendedRoom).localParticipant.setMicrophoneEnabled(false);
-      }
-
-      // Shrink avatar video to small overlay in bottom-right corner
-      const container = document.getElementById('lk-track-container');
-      if (container) {
-        // Container stays in place
-        container.style.position = 'relative';
-        container.style.transition = 'all 0.5s ease';
-
-        const videoElements = container.querySelectorAll('video');
-        videoElements.forEach(video => {
-          video.style.position = 'absolute';
-          video.style.bottom = '80px';  // Higher up to avoid controls
-          video.style.right = '20px';
-          video.style.width = '200px';  // Small but visible
-          video.style.height = 'auto';  // Maintain aspect ratio
-          video.style.maxWidth = '200px';
-          video.style.borderRadius = '0';  // No rounding - keep original shape
-          video.style.objectFit = 'contain';  // Keep original resolution/aspect
-          video.style.border = '2px solid rgba(255, 255, 255, 0.8)';
-          video.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.6)';
-          video.style.zIndex = '10';
-          video.style.transition = 'all 0.5s ease';
-        });
-      }
-
-      // Set state to trigger video loading in useEffect
-      setCurrentVideoUrl(videoUrl);
-      setIsDemoPlaying(true);
-
-    } catch (e) {
-      log('ERROR', 'Failed to start demo video', e);
-      setIsDemoPlaying(false);
-    }
-  }
-
-  function stopDemoVideo() {
-    try {
-      log('DEMO', '⏹️ Stopping demo video');
-      setIsDemoPlaying(false);
-      setCurrentVideoUrl('');
-
-      // Resume microphone
-      if (room && localAudioRef.current) {
-        log('DEMO', '🎤 Resuming microphone after demo');
-        (room as ExtendedRoom).localParticipant.setMicrophoneEnabled(true);
-      }
-
-      // Restore avatar video to normal size
-      const container = document.getElementById('lk-track-container');
-      if (container) {
-        container.style.position = 'relative';
-        container.style.width = '100%';
-        container.style.height = '70vh';
-        container.style.maxWidth = '1400px';
-        container.style.margin = '0 auto';
-        container.style.background = '#000';
-        container.style.borderRadius = '8px';
-        container.style.overflow = 'hidden';
-        container.style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
-
-        const videoElements = container.querySelectorAll('video');
-        videoElements.forEach(video => {
-          video.style.position = 'static';
-          video.style.width = '100%';
-          video.style.height = '100%';
-          video.style.maxWidth = '100%';
-          video.style.border = 'none';
-          video.style.borderRadius = '0';
-          video.style.objectFit = 'contain';
-          video.style.background = '#000';
-          video.style.zIndex = 'auto';
-        });
-      }
-
-      // Reset demo video
-      const demoVideo = demoVideoRef.current;
-      if (demoVideo) {
-        demoVideo.pause();
-        demoVideo.currentTime = 0;
-        demoVideo.src = '';
-      }
-
-      log('DEMO', '✅ Demo video stopped - avatar restored');
-
-    } catch (e) {
-      log('ERROR', 'Failed to stop demo video', e);
+    if (result.matched && result.videoUrl) {
+      playDemoVideo(result.videoUrl);
     }
   }
 

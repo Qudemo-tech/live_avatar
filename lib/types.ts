@@ -20,3 +20,11 @@ export interface ExtendedRoom extends Room {
 
 // Agent State Types
 export type AgentState = 'idle' | 'listening' | 'thinking' | 'speaking';
+
+// Log Entry Types
+export interface LogEntry {
+  id: number;
+  category: string;
+  message: string;
+  data?: any;
+}
