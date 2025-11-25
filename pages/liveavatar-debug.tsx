@@ -10,7 +10,14 @@ import {
   DataPacket_Kind,
   Track,
 } from 'livekit-client';
-import videoTriggers from '../config/video-triggers.json';
+import videoTriggersData from '../config/video-triggers.json';
+import { VideoTriggersConfig, ExtendedRoom, AgentState } from '../lib/types';
+
+const videoTriggers = videoTriggersData as VideoTriggersConfig;
+
+// Constants for keyword matching
+const RENDERING_KEYWORDS = ['rendering', 'render'];
+const DEMO_KEYWORD = 'demo';
 
 /**
  * LiveAvatar Debug Page - Enhanced Verbose Logging
@@ -39,15 +46,13 @@ export default function LivekitDebugPage() {
   const [detectedIntents, setDetectedIntents] = useState<string[]>([]);
   const [isDemoPlaying, setIsDemoPlaying] = useState(false);
   const [isLogsExpanded, setIsLogsExpanded] = useState(false);
-  const [agentState, setAgentState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
-  const [lastAvatarSpeech, setLastAvatarSpeech] = useState<string>('');
   const [currentVideoUrl, setCurrentVideoUrl] = useState<string>('');
 
   const localAudioRef = useRef<LocalAudioTrack | null>(null);
   const mountedRef = useRef(true);
   const logIdCounter = useRef(0);
   const demoVideoRef = useRef<HTMLVideoElement | null>(null);
-  const previousAgentStateRef = useRef<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
+  const previousAgentStateRef = useRef<AgentState>('idle');
   const lastAvatarSpeechRef = useRef<string>('');
 
   useEffect(() => {
@@ -61,7 +66,7 @@ export default function LivekitDebugPage() {
       try {
         if (room) {
           log('CLEANUP', 'Disconnecting room');
-          (room as any).disconnect?.();
+          (room as ExtendedRoom).disconnect();
         }
       } catch (e) {
         log('CLEANUP', 'Error disconnecting room', e);
@@ -428,9 +433,8 @@ export default function LivekitDebugPage() {
         else if (msgType === 'avatar_transcript' || msgType === 'avatar_speech' || msgType === 'llm_response') {
           const text = parsedJson.text || parsedJson.response || 'N/A';
           log('AVATAR_SPEECH', `💬 Avatar said: "${text}"`, parsedJson);
-          // Store last avatar speech (both ref and state)
+          // Store last avatar speech in ref
           lastAvatarSpeechRef.current = text;
-          setLastAvatarSpeech(text);
           // Detect intent in avatar speech
           detectIntent(text, parsedJson, 'avatar');
         }
@@ -448,9 +452,8 @@ export default function LivekitDebugPage() {
         } else if (parsedJson.event_type === 'avatar.transcription') {
           const text = parsedJson.text || 'N/A';
           log('AVATAR_SPEECH', `💬 Avatar said: "${text}"`, parsedJson);
-          // Store last avatar speech (both ref and state)
+          // Store last avatar speech in ref
           lastAvatarSpeechRef.current = text;
-          setLastAvatarSpeech(text);
           // Detect intent
           detectIntent(text, parsedJson, 'avatar');
         } else {
@@ -518,9 +521,8 @@ export default function LivekitDebugPage() {
           }, 100);
         }
 
-        // Update agent state
+        // Update agent state ref
         previousAgentStateRef.current = newAgentState;
-        setAgentState(newAgentState);
       } else {
         log('PARTICIPANT', 'ParticipantAttributesChanged', {
           participant: participant.identity,
@@ -731,7 +733,7 @@ export default function LivekitDebugPage() {
       }
 
       log('LOCAL_AUDIO', 'Publishing local audio track to room');
-      await (room as any).localParticipant.publishTrack(localAudioRef.current);
+      await (room as ExtendedRoom).localParticipant.publishTrack(localAudioRef.current);
       log('LOCAL_AUDIO', '✅ Local audio published - you can now speak to the avatar');
 
     } catch (e) {
@@ -747,7 +749,7 @@ export default function LivekitDebugPage() {
 
     try {
       log('LOCAL_AUDIO', 'Unpublishing local audio track');
-      await (room as any).localParticipant.unpublishTrack(localAudioRef.current);
+      await (room as ExtendedRoom).localParticipant.unpublishTrack(localAudioRef.current);
       
       localAudioRef.current.stop();
       localAudioRef.current = null;
@@ -776,7 +778,7 @@ export default function LivekitDebugPage() {
         kind: 'RELIABLE',
       });
 
-      await (room as any).localParticipant.publishData(data, DataPacket_Kind.RELIABLE);
+      await (room as ExtendedRoom).localParticipant.publishData(data, { reliable: true });
       log('DATA_CHANNEL', '✅ Data sent successfully');
 
     } catch (e) {
@@ -798,7 +800,7 @@ export default function LivekitDebugPage() {
         state: room.state,
       });
 
-      const lp = (room as any).localParticipant;
+      const lp = (room as ExtendedRoom).localParticipant;
       if (lp) {
         log('STATS', 'Local Participant', {
           sid: lp.sid,
@@ -896,16 +898,14 @@ export default function LivekitDebugPage() {
     // Use ref for immediate access to latest value
     const speech = lastAvatarSpeechRef.current;
     const lowerSpeech = speech.toLowerCase();
-    const tokens = lowerSpeech.split(/\s+/); // Split into words
+    // Split into words and strip punctuation
+    const tokens = lowerSpeech.split(/\s+/).map(word => word.replace(/[.,!?;:]/g, ''));
 
     log('DEMO_CHECK', `Checking last avatar speech: "${speech}"`, { tokens });
 
     // Step 1: Check for primary keywords (rendering/render AND demo)
-    const hasRenderingKeyword = (videoTriggers.triggers[0] as any).primaryKeywords
-      .slice(0, 2) // "rendering" or "render"
-      .some((kw: string) => tokens.includes(kw));
-
-    const hasDemoKeyword = tokens.includes('demo');
+    const hasRenderingKeyword = RENDERING_KEYWORDS.some(kw => tokens.includes(kw));
+    const hasDemoKeyword = tokens.includes(DEMO_KEYWORD);
 
     if (!hasRenderingKeyword || !hasDemoKeyword) {
       log('DEMO_CHECK', '❌ Missing primary keywords (rendering/render + demo)');
@@ -916,18 +916,18 @@ export default function LivekitDebugPage() {
 
     // Step 2: Check for company-specific keywords
     for (const trigger of videoTriggers.triggers) {
-      const secondaryKeywords = (trigger as any).secondaryKeywords || [];
+      const secondaryKeywords = trigger.secondaryKeywords;
 
       // Skip generic demo for now (check it last)
       if (secondaryKeywords.length === 0) continue;
 
       // Check if any secondary keyword (company name) is present
-      const hasCompanyKeyword = secondaryKeywords.some((kw: string) =>
+      const hasCompanyKeyword = secondaryKeywords.some(kw =>
         tokens.includes(kw.toLowerCase())
       );
 
       if (hasCompanyKeyword) {
-        const matchedKeywords = secondaryKeywords.filter((kw: string) =>
+        const matchedKeywords = secondaryKeywords.filter(kw =>
           tokens.includes(kw.toLowerCase())
         );
         log('DEMO_TRIGGER', `🎬 Company-specific demo detected! (${trigger.id})`, {
@@ -941,7 +941,7 @@ export default function LivekitDebugPage() {
 
     // Step 3: No company match → play generic demo
     const genericTrigger = videoTriggers.triggers.find(t =>
-      ((t as any).secondaryKeywords || []).length === 0
+      t.secondaryKeywords.length === 0
     );
 
     if (genericTrigger) {
@@ -966,7 +966,7 @@ export default function LivekitDebugPage() {
       // Pause microphone
       if (room && localAudioRef.current) {
         log('DEMO', '🎤 Pausing microphone during demo');
-        (room as any).localParticipant.setMicrophoneEnabled(false);
+        (room as ExtendedRoom).localParticipant.setMicrophoneEnabled(false);
       }
 
       // Shrink avatar video to small overlay in bottom-right corner
@@ -1012,7 +1012,7 @@ export default function LivekitDebugPage() {
       // Resume microphone
       if (room && localAudioRef.current) {
         log('DEMO', '🎤 Resuming microphone after demo');
-        (room as any).localParticipant.setMicrophoneEnabled(true);
+        (room as ExtendedRoom).localParticipant.setMicrophoneEnabled(true);
       }
 
       // Restore avatar video to normal size
