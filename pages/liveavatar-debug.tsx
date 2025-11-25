@@ -36,7 +36,7 @@ export default function LivekitDebugPage() {
   const [sessionInfo, setSessionInfo] = useState<any>(null);
   const [showMeetingPopup, setShowMeetingPopup] = useState(false);
   const [detectedIntents, setDetectedIntents] = useState<string[]>([]);
-  const [videoSize, setVideoSize] = useState<'small' | 'medium' | 'large' | 'fullscreen'>('fullscreen');
+  const [videoSize, setVideoSize] = useState<'small' | 'medium' | 'large' | 'fullscreen'>('medium');
   const [showLogs, setShowLogs] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   
@@ -615,11 +615,14 @@ export default function LivekitDebugPage() {
         if (track.kind === Track.Kind.Video) {
           // Google Meet style video with size control
           const styles = getVideoStyles(videoSize);
-          el.style.width = styles.width;
           el.style.maxWidth = styles.maxWidth;
-          el.style.height = videoSize === 'fullscreen' ? '100%' : 'auto';
-          el.style.objectFit = videoSize === 'fullscreen' ? 'cover' : 'contain';
-          el.style.backgroundColor = '#000';
+          el.style.width = styles.width;
+          el.style.border = '2px solid #4CAF50';
+          el.style.borderRadius = '8px';
+          el.style.objectFit = videoSize === 'fullscreen' ? 'contain' : 'cover';
+          if (videoSize === 'fullscreen') {
+            el.style.height = '100vh';
+          }
         }
 
         let container = document.getElementById('lk-track-container');
@@ -655,29 +658,17 @@ export default function LivekitDebugPage() {
         videoWrapper.style.position = 'relative';
         videoWrapper.style.width = styles.width;
         videoWrapper.style.maxWidth = styles.maxWidth;
-        videoWrapper.style.height = videoSize === 'fullscreen' ? '100%' : 'auto';
+        videoWrapper.style.height = 'auto';
+        if (videoSize === 'fullscreen') {
+          videoWrapper.style.width = '100%';
+          videoWrapper.style.maxWidth = '100%';
+        }
         videoWrapper.style.display = 'flex';
         videoWrapper.style.alignItems = 'center';
         videoWrapper.style.justifyContent = 'center';
         videoWrapper.style.margin = videoSize === 'fullscreen' ? '0' : '0 auto';
         
-        // Add participant name overlay (Google Meet style)
-        const nameOverlay = document.createElement('div');
-        nameOverlay.style.position = 'absolute';
-        nameOverlay.style.bottom = '16px';
-        nameOverlay.style.left = '16px';
-        nameOverlay.style.background = 'rgba(0, 0, 0, 0.6)';
-        nameOverlay.style.color = 'white';
-        nameOverlay.style.padding = '6px 12px';
-        nameOverlay.style.borderRadius = '4px';
-        nameOverlay.style.fontSize = '14px';
-        nameOverlay.style.fontWeight = '500';
-        nameOverlay.style.zIndex = '10';
-        nameOverlay.textContent = participant.name || participant.identity || 'Avatar';
-        nameOverlay.id = `name-overlay-${track.sid}`;
-        
         videoWrapper.appendChild(el);
-        videoWrapper.appendChild(nameOverlay);
         container.appendChild(videoWrapper);
       }
 
@@ -925,27 +916,43 @@ export default function LivekitDebugPage() {
     setVideoSize(newSize);
     log('UI', `Video size changed to: ${newSize}`);
     
-    // Update existing video elements with new size
+    // Update existing video elements and their wrappers
     const container = document.getElementById('lk-track-container');
     if (container) {
-      const videoWrappers = container.querySelectorAll('div[style*="position: relative"]');
-      const styles = getVideoStyles(newSize);
+      const newStyles = getVideoStyles(newSize);
       
+      // Update video wrappers (divs containing the videos)
+      const videoWrappers = container.querySelectorAll('div[style*="position: relative"]');
       videoWrappers.forEach((wrapper: any) => {
         if (wrapper.style) {
-          wrapper.style.width = styles.width;
-          wrapper.style.maxWidth = styles.maxWidth;
-          wrapper.style.margin = newSize === 'fullscreen' ? '0' : '0 auto';
+          if (newSize === 'fullscreen') {
+            wrapper.style.width = '100%';
+            wrapper.style.maxWidth = '100%';
+            wrapper.style.margin = '0';
+          } else {
+            wrapper.style.width = newStyles.width;
+            wrapper.style.maxWidth = newStyles.maxWidth;
+            wrapper.style.margin = '0 auto';
+          }
+          wrapper.style.height = 'auto';
         }
       });
       
+      // Update video elements
       const videoElements = container.querySelectorAll('video');
       videoElements.forEach((video: any) => {
         if (video.style) {
-          video.style.width = styles.width;
-          video.style.maxWidth = styles.maxWidth;
-          video.style.objectFit = newSize === 'fullscreen' ? 'cover' : 'contain';
-          video.style.height = newSize === 'fullscreen' ? '100%' : 'auto';
+          if (newSize === 'fullscreen') {
+            video.style.width = '100%';
+            video.style.maxWidth = '100%';
+            video.style.height = 'auto';
+            video.style.objectFit = 'contain';
+          } else {
+            video.style.width = newStyles.width;
+            video.style.maxWidth = newStyles.maxWidth;
+            video.style.height = 'auto';
+            video.style.objectFit = 'cover';
+          }
         }
       });
     }
@@ -963,9 +970,6 @@ export default function LivekitDebugPage() {
           overflow: hidden;
         }
         #lk-track-container video {
-          width: 100% !important;
-          height: 100% !important;
-          object-fit: cover;
           background: #000;
         }
       `}</style>
