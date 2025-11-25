@@ -1,0 +1,16 @@
+{
+  "triggers": [
+    {
+      "id": "demo-video",
+      "keywords": [
+        "rendering demo for you",
+        "render demo for you",
+        "rendering the demo",
+        "showing demo",
+        "show you the demo"
+      ],
+      "videoUrl": "https://storage.googleapis.com/video_db/demo.mp4",
+      "description": "Main demo video"
+    }
+  ]
+}

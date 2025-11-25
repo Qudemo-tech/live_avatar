@@ -12,9 +12,9 @@ npm install
 cp .env.local.example .env.local
 # Edit .env.local with your credentials
 
-# 3. Add Demo Video (Optional)
-# Place your demo video in the public directory
-cp /path/to/your/demo.mp4 public/demo.mp4
+# 3. Configure Video Triggers (Optional)
+# Edit config/video-triggers.json to add video URLs and trigger keywords
+# Videos are loaded from public GCS URLs - no need to store locally
 
 # 4. Run
 npm run dev
@@ -98,14 +98,34 @@ streamReady
 
 ### How It Works
 
-The application includes an automatic demo video playback system that triggers when the avatar says specific phrases.
+The application includes an automatic demo video playback system that triggers when the avatar says specific phrases. Video triggers are configured in `/config/video-triggers.json`.
 
-**Trigger Phrases:**
-- "rendering demo for you"
-- "render demo for you"
-- "rendering the demo"
-- "showing demo"
-- "show you the demo"
+**Configuration:**
+
+Edit `/config/video-triggers.json` to add video URLs with their trigger keywords:
+
+```json
+{
+  "triggers": [
+    {
+      "id": "demo-video",
+      "keywords": [
+        "rendering demo for you",
+        "render demo for you",
+        "rendering the demo",
+        "showing demo",
+        "show you the demo"
+      ],
+      "videoUrl": "https://storage.googleapis.com/your-bucket/demo.mp4",
+      "description": "Main demo video"
+    }
+  ]
+}
+```
+
+**Adding More Videos:**
+
+Simply add more trigger objects to support multiple videos. The system will match keywords and play the corresponding video from the public GCS URL.
 
 **State Tracking:**
 - Uses React refs (`previousAgentStateRef`, `lastAvatarSpeechRef`) for immediate value access
@@ -150,3 +170,9 @@ The application includes an automatic demo video playback system that triggers w
 - Hidden completely (`display: none`)
 - No visible controls
 - Remain functional in background
+
+**Video Source:**
+- Videos are loaded from public GCS URLs configured in `/config/video-triggers.json`
+- No local video storage required
+- Supports multiple videos with different trigger phrases
+- Uses `preload="metadata"` for faster startup

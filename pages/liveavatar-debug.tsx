@@ -10,6 +10,7 @@ import {
   DataPacket_Kind,
   Track,
 } from 'livekit-client';
+import videoTriggers from '../config/video-triggers.json';
 
 /**
  * LiveAvatar Debug Page - Enhanced Verbose Logging
@@ -40,6 +41,7 @@ export default function LivekitDebugPage() {
   const [isLogsExpanded, setIsLogsExpanded] = useState(false);
   const [agentState, setAgentState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
   const [lastAvatarSpeech, setLastAvatarSpeech] = useState<string>('');
+  const [currentVideoUrl, setCurrentVideoUrl] = useState<string>('');
 
   const localAudioRef = useRef<LocalAudioTrack | null>(null);
   const mountedRef = useRef(true);
@@ -51,11 +53,11 @@ export default function LivekitDebugPage() {
   useEffect(() => {
     mountedRef.current = true;
     log('SYSTEM', 'Component mounted - ready to start session');
-    
+
     return () => {
       mountedRef.current = false;
       log('SYSTEM', 'Component unmounting - cleaning up');
-      
+
       try {
         if (room) {
           log('CLEANUP', 'Disconnecting room');
@@ -64,7 +66,7 @@ export default function LivekitDebugPage() {
       } catch (e) {
         log('CLEANUP', 'Error disconnecting room', e);
       }
-      
+
       try {
         if (localAudioRef.current) {
           log('CLEANUP', 'Stopping local audio track');
@@ -73,11 +75,43 @@ export default function LivekitDebugPage() {
       } catch (e) {
         log('CLEANUP', 'Error stopping local audio', e);
       }
-      
+
       localAudioRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Effect to handle video loading when demo starts playing
+  useEffect(() => {
+    if (isDemoPlaying && currentVideoUrl && demoVideoRef.current) {
+      const demoVideo = demoVideoRef.current;
+      log('DEMO', '📹 Setting video source in effect', { videoUrl: currentVideoUrl });
+
+      demoVideo.src = currentVideoUrl;
+      demoVideo.load();
+
+      // Wait for video to be ready before playing
+      demoVideo.addEventListener('loadeddata', () => {
+        log('DEMO', '✅ Video loaded - attempting play');
+      }, { once: true });
+
+      demoVideo.addEventListener('canplay', () => {
+        log('DEMO', '✅ Video ready to play');
+      }, { once: true });
+
+      const playPromise = demoVideo.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            log('DEMO', '▶️ Demo video playing from GCS');
+          })
+          .catch((error) => {
+            log('ERROR', 'Video play failed', { error: error.message, videoUrl: currentVideoUrl });
+            setIsDemoPlaying(false);
+          });
+      }
+    }
+  }, [isDemoPlaying, currentVideoUrl]);
 
   function log(category: string, message: string, data?: any) {
     const entry: LogEntry = {
@@ -864,27 +898,33 @@ export default function LivekitDebugPage() {
     const lowerSpeech = speech.toLowerCase();
     log('DEMO_CHECK', `Checking last avatar speech: "${speech}"`);
 
-    if (lowerSpeech.includes('rendering demo for you') ||
-        lowerSpeech.includes('render demo for you') ||
-        lowerSpeech.includes('rendering the demo') ||
-        lowerSpeech.includes('showing demo') ||
-        lowerSpeech.includes('show you the demo')) {
-      log('DEMO_TRIGGER', '🎬 Demo trigger phrase detected! Starting demo video...');
-      playDemoVideo();
-    } else {
-      log('DEMO_CHECK', '❌ No demo trigger phrase found in avatar speech');
+    // Loop through all video triggers from config
+    for (const trigger of videoTriggers.triggers) {
+      const matched = trigger.keywords.some(keyword =>
+        lowerSpeech.includes(keyword.toLowerCase())
+      );
+
+      if (matched) {
+        log('DEMO_TRIGGER', `🎬 Demo trigger phrase detected! (${trigger.id})`, {
+          matchedKeywords: trigger.keywords.filter(k => lowerSpeech.includes(k.toLowerCase())),
+          videoUrl: trigger.videoUrl,
+        });
+        playDemoVideo(trigger.videoUrl);
+        return; // Stop checking after first match
+      }
     }
+
+    log('DEMO_CHECK', '❌ No demo trigger phrase found in avatar speech');
   }
 
-  function playDemoVideo() {
+  function playDemoVideo(videoUrl: string) {
     if (isDemoPlaying) {
       log('DEMO', 'Demo already playing');
       return;
     }
 
     try {
-      log('DEMO', '🎬 Starting demo video playback');
-      setIsDemoPlaying(true);
+      log('DEMO', '🎬 Starting demo video playback', { videoUrl });
 
       // Pause microphone
       if (room && localAudioRef.current) {
@@ -916,12 +956,9 @@ export default function LivekitDebugPage() {
         });
       }
 
-      // Play demo video
-      const demoVideo = demoVideoRef.current;
-      if (demoVideo) {
-        demoVideo.play();
-        log('DEMO', '▶️ Demo video playing');
-      }
+      // Set state to trigger video loading in useEffect
+      setCurrentVideoUrl(videoUrl);
+      setIsDemoPlaying(true);
 
     } catch (e) {
       log('ERROR', 'Failed to start demo video', e);
@@ -933,6 +970,7 @@ export default function LivekitDebugPage() {
     try {
       log('DEMO', '⏹️ Stopping demo video');
       setIsDemoPlaying(false);
+      setCurrentVideoUrl('');
 
       // Resume microphone
       if (room && localAudioRef.current) {
@@ -972,6 +1010,7 @@ export default function LivekitDebugPage() {
       if (demoVideo) {
         demoVideo.pause();
         demoVideo.currentTime = 0;
+        demoVideo.src = '';
       }
 
       log('DEMO', '✅ Demo video stopped - avatar restored');
@@ -1297,9 +1336,9 @@ export default function LivekitDebugPage() {
           }}>
             <video
               ref={demoVideoRef}
-              src="/demo.mp4"
               controls
               autoPlay
+              preload="metadata"
               style={{
                 width: '100%',
                 height: '100%',
